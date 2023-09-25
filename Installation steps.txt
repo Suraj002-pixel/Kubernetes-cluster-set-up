@@ -1,0 +1,367 @@
+Pre-requisites To Install Kubernetes 
+Since we are dealing with VMs, we recommend the following settings for the VMs:-
+
+Master:
+
+2 GB RAM
+2 Cores of CPU
+Slave/ Node:
+
+1 GB RAM
+1 Core of CPU
+
+Pre-Installation Steps On Both Master & Slave (To Install Kubernetes)
+The following steps have to be executed on both the master and node machines. Let’s call the master ‘kmaster‘ and node as ‘knode‘. 
+
+First, login as ‘sudo’ user because the following set of commands need to be executed with ‘sudo’ permissions. Then, update your ‘apt-get’ repository.
+
+
+Below steps are for both Master and all Nodes:
+================================================
+$ sudo su
+# apt-get update
+
+Note: After logging-in as ‘sudo’ user, note that your shell symbol will change to ‘#’ from ‘$’.
+
+Turn Off Swap Space
+Next, we have to turn off the swap space because Kubernetes will start throwing random errors otherwise. After that you need to open the ‘fstab’ file and comment out the line which has mention of swap partition.
+
+# swapoff -a
+# nano /etc/fstab
+put hash before where swap line
+Then press ‘Ctrl+X’, then press ‘Y’ and then press ‘Enter’ to Save the file.
+
+
+Update The Hostnames
+To change the hostname of both machines, run the below command to open the file and subsequently rename the master machine to ‘kmaster’ and your node machine to ‘knode’.
+
+# nano /etc/hostname
+
+kmaster
+
+Then press ‘Ctrl+X’, then press ‘Y’ and then press ‘Enter’ to Save the file.
+
+Update The Hosts File With IPs Of Master & Node
+Run the following command on both machines to note the IP addresses of each.
+
+# ifconfig
+
+check you ip and adapter name (eg-enp0s3)
+
+# nano /etc/hosts
+put all node names with ip as below
+192.168.1.3 master
+192.168.1.6 node01
+192.168.1.5 node02
+
+Setting Static IP Addresses
+Next, we will make the IP addresses used above, static for the VMs. We can do that by modifying the network interfaces file. Run the following command to open the file:
+
+# nano /etc/network/interfaces
+
+auto lo
+iface lo inet loopback
+
+auto enp0s3
+iface enp0s3 inet static
+address 192.168.1.3
+
+After saving this file by Pressing crtl+x Y enter
+Now reboot all systems one by one
+
+After this, restart your machine(s).
+
+Install OpenSSH-Server
+Now we have to install openshh-server. Run the following command:
+
+# sudo apt-get install openssh-server
+
+Install Docker
+Now we have to install Docker because Docker images will be used for managing the containers in the cluster. Run the following commands:
+
+# sudo su
+# apt-get update 
+# apt-get install -y docker.io
+Next we have to install these 3 essential components for setting up Kubernetes environment: kubeadm, kubectl, and kubelet.
+
+Run the following commands before installing the Kubernetes environment.
+
+# apt-get update && apt-get install -y apt-transport-https curl
+# curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add -
+# cat <<EOF >/etc/apt/sources.list.d/kubernetes.list
+deb http://apt.kubernetes.io/ kubernetes-xenial main
+EOF
+# apt-get update
+
+Install kubeadm, Kubelet And Kubectl 
+Now its time to install the 3 essential components. Kubelet is the lowest level component in Kubernetes. It’s responsible for what’s running on an individual machine. Kuebadm is used for administrating the Kubernetes cluster. Kubectl is used for controlling the configurations on various nodes inside the cluster.
+
+# apt-get install -y kubelet kubeadm kubectl 
+Updating Kubernetes Configuration
+Next, we will change the configuration file of Kubernetes. Run the following command:
+
+# nano /etc/systemd/system/kubelet.service.d/10-kubeadm.conf
+This will open a text editor, enter the following line after the last “Environment Variable”:
+
+Environment=”cgroup-driver=systemd/cgroup-driver=cgroupfs”
+
+Now press Ctrl+X, then press Y, and then press Enter to Save.
+
+Great!! You have successfully installed Kubernetes on both the machines now!
+
+
+Below steps are only for Master:
+================================
+
+Steps Only For Kubernetes Master VM (kmaster)
+Note: These steps will only be executed on the master node (kmaster VM).
+
+Step 1: We will now start our Kubernetes cluster from the master’s machine. Run the following command:
+
+# kubeadm init --apiserver-advertise-address=<ip-address-of-kmaster-vm> --pod-network-cidr=192.168.0.0/16
+
+You will get the below output. The commands marked as (1), execute them as a non-root user. This will enable you to use kubectl from the CLI
+The command marked as (2) should also be saved for future. This will be used to join nodes to your cluster
+
+Step 2: As mentioned before, run the commands from the above output as a non-root user
+
+$ mkdir -p $HOME/.kube
+$ sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+$ sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+Here apart from above command you will also get join command copy it and paste it on worker nodes as being a root user on nodes.
+
+Now install network plugin for internal communication:
+I will use Flannel for this.
+create a file by below command on master node and paste below yaml script in it and save it
+
+Vi kube-flannel.yaml (put below code in this file and save it)
+apiVersion: v1
+kind: Namespace
+metadata:
+  labels:
+    k8s-app: flannel
+    pod-security.kubernetes.io/enforce: privileged
+  name: kube-flannel
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    k8s-app: flannel
+  name: flannel
+  namespace: kube-flannel
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    k8s-app: flannel
+  name: flannel
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - get
+- apiGroups:
+  - ""
+  resources:
+  - nodes
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - nodes/status
+  verbs:
+  - patch
+- apiGroups:
+  - networking.k8s.io
+  resources:
+  - clustercidrs
+  verbs:
+  - list
+  - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    k8s-app: flannel
+  name: flannel
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: flannel
+subjects:
+- kind: ServiceAccount
+  name: flannel
+  namespace: kube-flannel
+---
+apiVersion: v1
+data:
+  cni-conf.json: |
+    {
+      "name": "cbr0",
+      "cniVersion": "0.3.1",
+      "plugins": [
+        {
+          "type": "flannel",
+          "delegate": {
+            "hairpinMode": true,
+            "isDefaultGateway": true
+          }
+        },
+        {
+          "type": "portmap",
+          "capabilities": {
+            "portMappings": true
+          }
+        }
+      ]
+    }
+  net-conf.json: |
+    {
+      "Network": "192.168.0.0/16",
+      "Backend": {
+        "Type": "vxlan"
+      }
+    }
+kind: ConfigMap
+metadata:
+  labels:
+    app: flannel
+    k8s-app: flannel
+    tier: node
+  name: kube-flannel-cfg
+  namespace: kube-flannel
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  labels:
+    app: flannel
+    k8s-app: flannel
+    tier: node
+  name: kube-flannel-ds
+  namespace: kube-flannel
+spec:
+  selector:
+    matchLabels:
+      app: flannel
+      k8s-app: flannel
+  template:
+    metadata:
+      labels:
+        app: flannel
+        k8s-app: flannel
+        tier: node
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: kubernetes.io/os
+                operator: In
+                values:
+                - linux
+      containers:
+      - args:
+        - --ip-masq
+        - --kube-subnet-mgr
+        command:
+        - /opt/bin/flanneld
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: EVENT_QUEUE_DEPTH
+          value: "5000"
+        image: docker.io/flannel/flannel:v0.22.0
+        name: kube-flannel
+        resources:
+          requests:
+            cpu: 100m
+            memory: 50Mi
+        securityContext:
+          capabilities:
+            add:
+            - NET_ADMIN
+            - NET_RAW
+          privileged: false
+        volumeMounts:
+        - mountPath: /run/flannel
+          name: run
+        - mountPath: /etc/kube-flannel/
+          name: flannel-cfg
+        - mountPath: /run/xtables.lock
+          name: xtables-lock
+      hostNetwork: true
+      initContainers:
+      - args:
+        - -f
+        - /flannel
+        - /opt/cni/bin/flannel
+        command:
+        - cp
+        image: docker.io/flannel/flannel-cni-plugin:v1.1.2
+        name: install-cni-plugin
+        volumeMounts:
+        - mountPath: /opt/cni/bin
+          name: cni-plugin
+      - args:
+        - -f
+        - /etc/kube-flannel/cni-conf.json
+        - /etc/cni/net.d/10-flannel.conflist
+        command:
+        - cp
+        image: docker.io/flannel/flannel:v0.22.0
+        name: install-cni
+        volumeMounts:
+        - mountPath: /etc/cni/net.d
+          name: cni
+        - mountPath: /etc/kube-flannel/
+          name: flannel-cfg
+      priorityClassName: system-node-critical
+      serviceAccountName: flannel
+      tolerations:
+      - effect: NoSchedule
+        operator: Exists
+      volumes:
+      - hostPath:
+          path: /run/flannel
+        name: run
+      - hostPath:
+          path: /opt/cni/bin
+        name: cni-plugin
+      - hostPath:
+          path: /etc/cni/net.d
+        name: cni
+      - configMap:
+          name: kube-flannel-cfg
+        name: flannel-cfg
+      - hostPath:
+          path: /run/xtables.lock
+          type: FileOrCreate
+        name: xtables-lock
+==============================================================================
+save above file on master and after that run below commands
+kubectl create -f kube-flannel.yaml (it will create network for pod communication)
+
+Now run kubectl get nodes on master you will get node list of nodes
+
+Your K8S cluster is ready now.!!
+
+
+
+
